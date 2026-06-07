@@ -54,8 +54,13 @@ export default function Paint({ windowId }: PaintProps) {
     const img = ctx.getImageData(0, 0, canvasSize.w, canvasSize.h);
     historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1);
     historyRef.current.push(img);
-    historyIdxRef.current = historyIdxRef.current.length - 1;
-    if (historyRef.current.length > 50) { historyRef.current.shift(); historyIdxRef.current--; }
+    historyIdxRef.current = historyRef.current.length - 1;
+    if (historyRef.current.length > 50) {
+      historyRef.current.shift();
+      if (historyIdxRef.current > 0) {
+        historyIdxRef.current--;
+      }
+    }
   }, [canvasSize]);
 
   const loadImageFromData = useCallback((dataUrl: string) => {
@@ -65,6 +70,8 @@ export default function Paint({ windowId }: PaintProps) {
     img.onload = () => {
       ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
       ctx.drawImage(img, 0, 0, canvasSize.w, canvasSize.h);
+      historyRef.current = [];
+      historyIdxRef.current = -1;
       saveHistory();
     };
     img.src = dataUrl;
@@ -101,7 +108,14 @@ export default function Paint({ windowId }: PaintProps) {
 
   const undo = () => { if (historyIdxRef.current > 0) { historyIdxRef.current--; restore(); setIsDirty(true); }};
   const redo = () => { if (historyIdxRef.current < historyRef.current.length - 1) { historyIdxRef.current++; restore(); setIsDirty(true); }};
-  const restore = () => { const ctx = ctxRef.current; if (ctx) ctx.putImageData(historyRef.current[historyIdxRef.current], 0, 0); };
+  const restore = () => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const idx = historyIdxRef.current;
+    if (idx >= 0 && idx < historyRef.current.length) {
+      ctx.putImageData(historyRef.current[idx], 0, 0);
+    }
+  };
 
   const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -189,6 +203,8 @@ export default function Paint({ windowId }: PaintProps) {
     if (ctx) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
+      historyRef.current = [];
+      historyIdxRef.current = -1;
       saveHistory();
     }
     setIsDirty(false);

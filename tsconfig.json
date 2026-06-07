@@ -30,7 +30,11 @@
     }
   },
   "include": [
-    "src",
-    "api"
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/test"
   ]
 }
