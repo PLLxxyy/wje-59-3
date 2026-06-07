@@ -5,6 +5,7 @@ import type {
   AppId,
   BootPhase,
   NotepadDoc,
+  PaintDoc,
   ContextMenuState,
 } from '../types/os';
 import { defaultThemeId, getThemeById, applyTheme } from '../themes';
@@ -30,6 +31,7 @@ const getInitialState = (): OSState => ({
   theme: defaultThemeId,
   desktopIcons: defaultDesktopIcons,
   notepadDocs: [],
+  paintDocs: [],
   showStartMenu: false,
   contextMenu: null,
   selectedIconId: null,
@@ -77,6 +79,8 @@ interface OSActions {
   setSelectedIconId: (id: string | null) => void;
   saveNotepadDoc: (doc: NotepadDoc) => void;
   deleteNotepadDoc: (docId: string) => void;
+  savePaintDoc: (doc: PaintDoc) => void;
+  deletePaintDoc: (docId: string) => void;
   resetOS: () => void;
 }
 
@@ -105,6 +109,15 @@ export const useOSStore = create<OSStore>((set, get) => {
       );
 
       if (existingWindow) {
+        if (Object.keys(appState).length > 0) {
+          set({
+            windows: state.windows.map((w) =>
+              w.id === existingWindow.id
+                ? { ...w, appState: { ...w.appState, ...appState } }
+                : w
+            ),
+          });
+        }
         get().focusWindow(existingWindow.id);
         return;
       }
@@ -116,7 +129,9 @@ export const useOSStore = create<OSStore>((set, get) => {
       if (minimizedWindow) {
         set({
           windows: state.windows.map((w) =>
-            w.id === minimizedWindow.id ? { ...w, isMinimized: false } : w
+            w.id === minimizedWindow.id
+              ? { ...w, isMinimized: false, appState: { ...w.appState, ...appState } }
+              : w
           ),
           activeWindowId: minimizedWindow.id,
           showStartMenu: false,
@@ -364,6 +379,26 @@ export const useOSStore = create<OSStore>((set, get) => {
       const state = get();
       set({
         notepadDocs: state.notepadDocs.filter((d) => d.id !== docId),
+      });
+    },
+
+    savePaintDoc: (doc) => {
+      const state = get();
+      const existingIndex = state.paintDocs.findIndex((d) => d.id === doc.id);
+      let newDocs;
+      if (existingIndex >= 0) {
+        newDocs = [...state.paintDocs];
+        newDocs[existingIndex] = doc;
+      } else {
+        newDocs = [...state.paintDocs, doc];
+      }
+      set({ paintDocs: newDocs });
+    },
+
+    deletePaintDoc: (docId) => {
+      const state = get();
+      set({
+        paintDocs: state.paintDocs.filter((d) => d.id !== docId),
       });
     },
 

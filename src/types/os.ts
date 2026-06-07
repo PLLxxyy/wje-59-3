@@ -41,6 +41,15 @@ export interface NotepadDoc {
   isDirty: boolean;
 }
 
+export interface PaintDoc {
+  id: string;
+  name: string;
+  imageData: string;
+  createdAt: number;
+  updatedAt: number;
+  isDirty: boolean;
+}
+
 export interface FileItem {
   id: string;
   name: string;
@@ -107,6 +116,7 @@ export interface OSState {
   theme: string;
   desktopIcons: DesktopIcon[];
   notepadDocs: NotepadDoc[];
+  paintDocs: PaintDoc[];
   showStartMenu: boolean;
   contextMenu: ContextMenuState | null;
   selectedIconId: string | null;

@@ -77,7 +77,7 @@ function getBreadcrumbNames(path: string[]): string[] {
 }
 
 export default function MyComputer({ windowId }: MyComputerProps) {
-  const { updateAppState, windows } = useOSStore()
+  const { updateAppState, windows, paintDocs, openWindow } = useOSStore()
   const windowState = windows.find(w => w.id === windowId)
   const appState = windowState?.appState || {}
 
@@ -88,9 +88,24 @@ export default function MyComputer({ windowId }: MyComputerProps) {
     updateAppState(windowId, { currentPath })
   }, [currentPath, windowId, updateAppState])
 
+  const isInPhotosFolder = currentPath.length === 2 && currentPath[0] === 'my-documents' && currentPath[1] === 'photos'
+
   const currentItems = useMemo(() => {
-    return findItemByPath(fileSystem, currentPath) || []
-  }, [currentPath])
+    const baseItems = findItemByPath(fileSystem, currentPath) || []
+    if (isInPhotosFolder) {
+      const paintFiles: FileItem[] = paintDocs.map(doc => ({
+        id: `paint-${doc.id}`,
+        name: `${doc.name}.png`,
+        type: 'file' as const,
+        icon: '🖼️',
+        size: `${Math.round(doc.imageData.length / 1024)} KB`,
+        modified: new Date(doc.updatedAt).toLocaleDateString(),
+        children: [],
+      }))
+      return [...baseItems, ...paintFiles]
+    }
+    return baseItems
+  }, [currentPath, isInPhotosFolder, paintDocs])
 
   const breadcrumbNames = getBreadcrumbNames(currentPath)
 
@@ -98,6 +113,17 @@ export default function MyComputer({ windowId }: MyComputerProps) {
     if (item.type === 'folder') {
       setCurrentPath([...currentPath, item.id])
       setSelectedId(null)
+    } else if (item.id.startsWith('paint-')) {
+      const docId = item.id.replace('paint-', '')
+      const doc = paintDocs.find(d => d.id === docId)
+      if (doc) {
+        openWindow('paint', {
+          imageData: doc.imageData,
+          docId: doc.id,
+          docName: doc.name,
+          isDirty: false,
+        })
+      }
     }
   }
 

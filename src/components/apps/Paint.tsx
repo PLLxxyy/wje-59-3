@@ -1,4 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useOSStore } from '@/store/useOSStore';
+import { generateId } from '@/utils/id';
+import type { PaintDoc } from '@/types/os';
 
 type Tool = 'pencil' | 'brush' | 'eraser' | 'fill' | 'line' | 'rect' | 'ellipse';
 type BrushSize = 1 | 3 | 5 | 8;
@@ -11,7 +14,10 @@ interface PaintProps {
   windowId: string;
 }
 
-export default function Paint({}: PaintProps) {
+export default function Paint({ windowId }: PaintProps) {
+  const { paintDocs, savePaintDoc, updateAppState, closeWindow } = useOSStore();
+  const windowState = useOSStore(state => state.windows.find(w => w.id === windowId));
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const historyRef = useRef<ImageData[]>([]);
@@ -28,15 +34,41 @@ export default function Paint({}: PaintProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [tempData, setTempData] = useState<ImageData | null>(null);
 
+  const [docId, setDocId] = useState<string>('');
+  const [docName, setDocName] = useState<string>('未命名');
+  const [isDirty, setIsDirty] = useState(false);
+  const [canvasReady, setCanvasReady] = useState(false);
+
+  const updateTitle = useCallback((name: string, dirty: boolean) => {
+    const title = `画图 - ${name}${dirty ? ' *' : ''}`;
+    updateAppState(windowId, { title });
+  }, [windowId, updateAppState]);
+
+  useEffect(() => {
+    updateTitle(docName, isDirty);
+  }, [docName, isDirty, updateTitle]);
+
   const saveHistory = useCallback(() => {
     const canvas = canvasRef.current, ctx = ctxRef.current;
     if (!canvas || !ctx) return;
     const img = ctx.getImageData(0, 0, canvasSize.w, canvasSize.h);
     historyRef.current = historyRef.current.slice(0, historyIdxRef.current + 1);
     historyRef.current.push(img);
-    historyIdxRef.current = historyRef.current.length - 1;
+    historyIdxRef.current = historyIdxRef.current.length - 1;
     if (historyRef.current.length > 50) { historyRef.current.shift(); historyIdxRef.current--; }
   }, [canvasSize]);
+
+  const loadImageFromData = useCallback((dataUrl: string) => {
+    const canvas = canvasRef.current, ctx = ctxRef.current;
+    if (!canvas || !ctx || !dataUrl) return;
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvasSize.w, canvasSize.h);
+      ctx.drawImage(img, 0, 0, canvasSize.w, canvasSize.h);
+      saveHistory();
+    };
+    img.src = dataUrl;
+  }, [canvasSize, saveHistory]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -47,10 +79,28 @@ export default function Paint({}: PaintProps) {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
     saveHistory();
+    setCanvasReady(true);
   }, []);
 
-  const undo = () => { if (historyIdxRef.current > 0) { historyIdxRef.current--; restore(); }};
-  const redo = () => { if (historyIdxRef.current < historyRef.current.length - 1) { historyIdxRef.current++; restore(); }};
+  useEffect(() => {
+    if (!canvasReady || !windowState) return;
+    const state = windowState.appState || {};
+    if (state.imageData !== undefined && state.imageData !== '') {
+      loadImageFromData(state.imageData);
+    }
+    if (state.isDirty !== undefined) {
+      setIsDirty(state.isDirty);
+    }
+    if (state.docId !== undefined && state.docId !== docId) {
+      setDocId(state.docId);
+    }
+    if (state.docName !== undefined && state.docName !== docName) {
+      setDocName(state.docName);
+    }
+  }, [canvasReady, windowState?.appState?.imageData, windowState?.appState?.isDirty, windowState?.appState?.docId, windowState?.appState?.docName, loadImageFromData]);
+
+  const undo = () => { if (historyIdxRef.current > 0) { historyIdxRef.current--; restore(); setIsDirty(true); }};
+  const redo = () => { if (historyIdxRef.current < historyRef.current.length - 1) { historyIdxRef.current++; restore(); setIsDirty(true); }};
   const restore = () => { const ctx = ctxRef.current; if (ctx) ctx.putImageData(historyRef.current[historyIdxRef.current], 0, 0); };
 
   const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -85,7 +135,7 @@ export default function Paint({}: PaintProps) {
     setStartPos(pos);
     const ctx = ctxRef.current;
     if (!ctx) return;
-    if (tool === 'fill') { floodFill(pos.x, pos.y, fgColor); saveHistory(); setDrawing(false); return; }
+    if (tool === 'fill') { floodFill(pos.x, pos.y, fgColor); saveHistory(); setIsDirty(true); setDrawing(false); return; }
     if (['pencil','brush','eraser'].includes(tool)) {
       ctx.beginPath(); ctx.moveTo(pos.x, pos.y);
       ctx.strokeStyle = tool === 'eraser' ? bgColor : fgColor;
@@ -118,12 +168,95 @@ export default function Paint({}: PaintProps) {
     }
   };
 
-  const onMouseUp = () => { if (drawing) saveHistory(); setDrawing(false); setStartPos(null); setTempData(null); ctxRef.current?.beginPath(); };
-  const clearCanvas = () => { const ctx = ctxRef.current; if (!ctx) return; ctx.fillStyle = bgColor; ctx.fillRect(0,0,canvasSize.w,canvasSize.h); saveHistory(); };
-  const exportPNG = () => { const c = canvasRef.current; if (!c) return; const a = document.createElement('a'); a.download='drawing.png'; a.href=c.toDataURL('image/png'); a.click(); };
+  const onMouseUp = () => { if (drawing) { saveHistory(); setIsDirty(true); } setDrawing(false); setStartPos(null); setTempData(null); ctxRef.current?.beginPath(); };
+  const clearCanvas = () => { const ctx = ctxRef.current; if (!ctx) return; ctx.fillStyle = bgColor; ctx.fillRect(0,0,canvasSize.w,canvasSize.h); saveHistory(); setIsDirty(true); };
+  const exportPNG = () => { const c = canvasRef.current; if (!c) return; const a = document.createElement('a'); a.download=`${docName}.png`; a.href=c.toDataURL('image/png'); a.click(); };
 
-  const menus: Record<string, {label:string;onClick?:()=>void;disabled?:boolean;divider?:boolean}[][]> = {
-    '文件': [[{label:'新建',onClick:clearCanvas},{label:'打开',disabled:true},{label:'保存',onClick:exportPNG},{label:'另存为',onClick:exportPNG,divider:true},{label:'退出',disabled:true}]],
+  const checkUnsavedChanges = (): boolean => {
+    if (isDirty) {
+      const result = confirm(`${docName} 有未保存的更改，是否保存？`);
+      if (result) {
+        handleSave();
+      }
+      return result;
+    }
+    return true;
+  };
+
+  const handleNew = () => {
+    if (!checkUnsavedChanges()) return;
+    const ctx = ctxRef.current;
+    if (ctx) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvasSize.w, canvasSize.h);
+      saveHistory();
+    }
+    setIsDirty(false);
+    setDocId('');
+    setDocName('未命名');
+    updateAppState(windowId, { imageData: '', docId: '', docName: '未命名' });
+    setActiveMenu(null);
+  };
+
+  const handleOpen = (doc: PaintDoc) => {
+    if (!checkUnsavedChanges()) return;
+    loadImageFromData(doc.imageData);
+    setIsDirty(false);
+    setDocId(doc.id);
+    setDocName(doc.name);
+    updateAppState(windowId, { imageData: doc.imageData, docId: doc.id, docName: doc.name });
+    setActiveMenu(null);
+  };
+
+  const getCurrentImageData = (): string => {
+    const c = canvasRef.current;
+    return c ? c.toDataURL('image/png') : '';
+  };
+
+  const handleSave = () => {
+    const now = Date.now();
+    const imageData = getCurrentImageData();
+    const doc: PaintDoc = {
+      id: docId || generateId(),
+      name: docName,
+      imageData,
+      createdAt: docId ? (paintDocs.find(d => d.id === docId)?.createdAt || now) : now,
+      updatedAt: now,
+      isDirty: false,
+    };
+    savePaintDoc(doc);
+    setDocId(doc.id);
+    setIsDirty(false);
+    updateAppState(windowId, { docId: doc.id, imageData });
+  };
+
+  const handleSaveAs = () => {
+    const name = prompt('输入文件名：', docName);
+    if (!name) return;
+    const now = Date.now();
+    const imageData = getCurrentImageData();
+    const doc: PaintDoc = {
+      id: generateId(),
+      name,
+      imageData,
+      createdAt: now,
+      updatedAt: now,
+      isDirty: false,
+    };
+    savePaintDoc(doc);
+    setDocId(doc.id);
+    setDocName(name);
+    setIsDirty(false);
+    updateAppState(windowId, { docId: doc.id, docName: name, imageData });
+  };
+
+  const handleExit = () => {
+    if (!checkUnsavedChanges()) return;
+    closeWindow(windowId);
+  };
+
+  const menus: Record<string, {label:string;onClick?:()=>void;disabled?:boolean;divider?:boolean;submenu?:boolean}[][]> = {
+    '文件': [[{label:'新建',onClick:handleNew},{label:'打开',submenu:true},{label:'保存',onClick:handleSave},{label:'另存为',onClick:handleSaveAs,divider:true},{label:'导出图片',onClick:exportPNG,divider:true},{label:'退出',onClick:handleExit}]],
     '编辑': [[{label:'撤销',onClick:undo},{label:'重做',onClick:redo,divider:true},{label:'剪切',disabled:true},{label:'复制',disabled:true},{label:'粘贴',disabled:true,divider:true},{label:'全选',disabled:true}]],
     '查看': [[{label:'工具箱',disabled:true},{label:'颜料盒',disabled:true}]],
     '图像': [[{label:'清除图像',onClick:clearCanvas},{label:'翻转/旋转',disabled:true}]],
@@ -145,10 +278,34 @@ export default function Paint({}: PaintProps) {
                   <div key={gi}>
                     {g.map((item,ii)=>(
                       <div key={ii}>
-                        <button className="w-full text-left px-4 py-1 os-menu-item disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-inherit" onClick={(e)=>{e.stopPropagation();item.onClick?.();setActiveMenu(null);}} disabled={item.disabled}>
-                          {item.label}
-                        </button>
-                        {item.divider && <div className="os-menu-divider"/>}
+                        {item.submenu ? (
+                          <div className="relative">
+                            <button className="w-full text-left px-4 py-1 os-menu-item" onClick={(e)=>{e.stopPropagation();}}>
+                              <span>{item.label}</span>
+                              <span className="ml-4">▶</span>
+                            </button>
+                            {activeMenu === menu && (
+                              <div className="absolute left-full top-0 os-raised bg-[var(--os-menuBg)] min-w-40 py-1 max-h-60 overflow-y-auto">
+                                {paintDocs.length === 0 ? (
+                                  <div className="os-menu-item opacity-50">没有已保存的图片</div>
+                                ) : (
+                                  paintDocs.map((doc) => (
+                                    <div key={doc.id} className="os-menu-item" onClick={(e)=>{e.stopPropagation();handleOpen(doc);}}>
+                                      🎨 {doc.name}
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            <button className="w-full text-left px-4 py-1 os-menu-item disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-inherit" onClick={(e)=>{e.stopPropagation();item.onClick?.();setActiveMenu(null);}} disabled={item.disabled}>
+                              {item.label}
+                            </button>
+                            {item.divider && <div className="os-menu-divider"/>}
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -199,6 +356,7 @@ export default function Paint({}: PaintProps) {
       <div className="flex gap-1 px-1 py-0.5 text-xs border-t border-[var(--os-buttonShadow)] bg-[var(--os-windowBg)]">
         <div className="px-2 py-0.5 os-inset">{mousePos?`${mousePos.x}, ${mousePos.y}`:'0, 0'}</div>
         <div className="px-2 py-0.5 os-inset">{canvasSize.w} × {canvasSize.h}</div>
+        <div className="px-2 py-0.5 os-inset">{isDirty ? '已修改' : '已保存'}</div>
       </div>
     </div>
   );
